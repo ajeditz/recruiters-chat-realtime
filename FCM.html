@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Chat</title>
+</head>
+<body>
+    <h2>WebSocket Chat</h2>
+    <label>Enter Your User ID:</label>
+    <input type="text" id="userId" placeholder="Your ID">
+    <button onclick="connectWebSocket()">Connect</button>
+    <br><br>
+    <label>Send Message To (User ID):</label>
+    <input type="text" id="receiverId" placeholder="Receiver ID">
+    <br>
+    <textarea id="message" placeholder="Type your message..."></textarea>
+    <button onclick="sendMessage()">Send</button>
+    <br>
+    <h3>Messages:</h3>
+    <div id="chatBox" style="border:1px solid #000; padding:10px; height:200px; overflow-y:scroll;"></div>
+    
+    <script>
+        let socket;
+        let userId;
+        function connectWebSocket() {
+            userId = document.getElementById("userId").value;
+            if (!userId) {
+                alert("Please enter a valid user ID");
+                return;
+            }
+            socket = new WebSocket(`ws://localhost:8000/ws/chat/${userId}`);
+            
+            socket.onopen = () => {
+                console.log("Connected to WebSocket");
+                document.getElementById("chatBox").innerHTML += `<p class="system-message">Connected to chat as ${userId}</p>`;
+            };
+
+            socket.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                console.log("Received message:", data);
+
+                // Handle different message types
+                if (data.error) {
+                    document.getElementById("chatBox").innerHTML += `<p class="error-message">${data.error}</p>`;
+                    return;
+                }
+
+                if (data.type === "message_sent") {
+                    // This is a confirmation of our sent message
+                    const msgData = data.message;
+                    document.getElementById("chatBox").innerHTML += `<p class="sent-message"><strong>You to ${msgData.recipient_id}:</strong> ${msgData.content}</p>`;
+                    // Clear message input
+                    document.getElementById("message").value = "";
+                    return;
+                }
+
+                // This is a received message
+                if (data.sender_id && data.content) {
+                    document.getElementById("chatBox").innerHTML += `<p class="received-message"><strong>${data.sender_id}:</strong> ${data.content}</p>`;
+                }
+            };
+
+            socket.onclose = () => {
+                console.log("WebSocket Disconnected");
+                document.getElementById("chatBox").innerHTML += `<p class="system-message">Disconnected from chat</p>`;
+            };
+        }
+
+        function sendMessage() {
+            const receiverId = document.getElementById("receiverId").value;
+            const messageContent = document.getElementById("message").value;
+            
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                alert("WebSocket is not connected. Connect first.");
+                return;
+            }
+            
+            if (!receiverId || !messageContent) {
+                alert("Receiver ID and message cannot be empty");
+                return;
+            }
+            
+            // Fix: Use recipient_id instead of receiver_id to match backend
+            const data = { 
+                recipient_id: receiverId, 
+                content: messageContent 
+            };
+            
+            console.log("Sending message:", data);
+            socket.send(JSON.stringify(data));
+        }
+    </script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        textarea {
+            width: 100%;
+            height: 60px;
+            margin: 10px 0;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            margin: 5px 0;
+        }
+        input {
+            padding: 8px;
+            margin: 5px 0;
+        }
+        .system-message {
+            color: #888;
+            font-style: italic;
+        }
+        .error-message {
+            color: #f44336;
+        }
+        .sent-message {
+            text-align: right;
+            color: #2196F3;
+        }
+        .received-message {
+            text-align: left;
+            color: #4CAF50;
+        }
+    </style>
+</body>
+</html>
