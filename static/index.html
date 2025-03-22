@@ -294,6 +294,44 @@
             background-color: #e4e6eb;
             cursor: not-allowed;
         }
+        
+        .message .option {
+            background-color: #f0f2f5;
+            padding: 8px 12px;
+            border-radius: 8px;
+            margin: 4px 0;
+            cursor: pointer;
+        }
+        
+        .message .option:hover {
+            background-color: #e4e6eb;
+        }
+        
+        .message-content {
+            word-break: break-word;
+        }
+
+        .profile-pic {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            margin-right: 10px;
+            object-fit: cover;
+        }
+        
+        .profile-pic-placeholder {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            margin-right: 10px;
+            background-color: #1877f2;
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -383,6 +421,15 @@
         const messagesContainer = document.getElementById('messagesContainer');
         const messageForm = document.getElementById('messageForm');
         const messageInput = document.getElementById('messageInput');
+
+        // Add this after your DOM Elements section
+        const userModel = {
+            id: null,
+            name: '',
+            online: false,
+            last_seen: null,
+            profile_pic_url: null
+        };
 
         // App State
         let state = {
@@ -519,37 +566,41 @@
         // Handle login
         async function handleLogin() {
             const userId = userIdInput.value.trim();
-            const username = usernameInput.value.trim();
+            const name = usernameInput.value.trim();
 
-            if (!userId || !username) {
-                alert('Please enter both user ID and username');
+            if (!userId || !name) {
+                alert('Please enter both user ID and name');
                 return;
             }
 
             try {
-                // Get or create user
-                const response = await fetch(`/api/recruiters/${userId}`);
-                
+                // Create new user
+                const response = await fetch('/api/recruiters/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ 
+                        id: userId, 
+                        name: name,
+                        online: true,
+                        last_seen: Date.now() / 1000
+                    })
+                });
+
                 if (!response.ok) {
-                    // Create new user if not exists
-                    await fetch('/api/recruiters/', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ id: userId, username })
-                    });
+                    throw new Error('Failed to create user');
                 }
 
                 // Save to localStorage
                 localStorage.setItem('userId', userId);
-                localStorage.setItem('username', username);
-                
-                // Update state
+                localStorage.setItem('name', name);  // Changed from username to name
+
+                // Update state and UI
                 state.userId = userId;
-                state.username = username;
+                state.name = name;  // Changed from username to name
+                currentUsername.textContent = name;  // This will update the header
                 
                 // Show app
                 showApp();
-                currentUsername.textContent = username;
                 
                 // Connect to WebSocket
                 connectWebSocket();
@@ -651,17 +702,33 @@
                     div.classList.add('active');
                 }
                 
-                const lastMsgTime = new Date(conv.last_message.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                const lastMsgTime = new Date(conv.last_message.timestamp).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                
+                // Handle last message content as dictionary
+                let lastMessageText = '';
+                if (typeof conv.last_message.content === 'object') {
+                    if (conv.last_message.content.type === 'text') {
+                        lastMessageText = conv.last_message.content.text;
+                    } else {
+                        lastMessageText = JSON.stringify(conv.last_message.content);
+                    }
+                }
                 
                 div.innerHTML = `
                     <div class="user-item-header">
                         <div class="user-name">
-                            <div class="status-dot ${conv.user.online ? 'online' : 'offline'}" style="width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background-color: ${conv.user.online ? '#42b72a' : '#8a8d91'};"></div>
-                            <span>${conv.user.username}</span>
+                            ${conv.user.profile_pic_url ? 
+                                `<img src="${conv.user.profile_pic_url}" class="profile-pic" alt="${conv.user.name}">` :
+                                `<div class="profile-pic-placeholder">${conv.user.name.charAt(0)}</div>`
+                            }
+                            <div class="status-dot ${conv.user.online ? 'online' : 'offline'}" 
+                                 style="width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; 
+                                 background-color: ${conv.user.online ? '#42b72a' : '#8a8d91'};"></div>
+                            <span>${conv.user.name}</span>
                         </div>
                         ${conv.unread_count > 0 ? `<span class="unread-badge">${conv.unread_count}</span>` : ''}
                     </div>
-                    <div class="last-message">${conv.last_message.content}</div>
+                    <div class="last-message">${lastMessageText}</div>
                     <div class="timestamp">${lastMsgTime}</div>
                 `;
                 
@@ -696,9 +763,13 @@
                 
                 div.innerHTML = `
                     <div class="user-name">
+                        ${user.profile_pic_url ? 
+                            `<img src="${user.profile_pic_url}" class="profile-pic" alt="${user.name}">` :
+                            `<div class="profile-pic-placeholder">${user.name.charAt(0)}</div>`
+                        }
                         <div class="status-dot ${user.online ? 'online' : 'offline'}" 
                              style="width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background-color: ${user.online ? '#42b72a' : '#8a8d91'};"></div>
-                        <span>${user.username}</span>
+                        <span>${user.name}</span>
                     </div>
                 `;
                 
@@ -733,7 +804,7 @@
                 // Update UI
                 emptyChat.style.display = 'none';
                 chatArea.style.display = 'flex';
-                recipientName.textContent = user.username;
+                recipientName.textContent = user.name;  // Changed from username to name
                 recipientStatus.className = user.online ? 'status-dot online' : 'status-dot offline';
                 recipientStatus.style.backgroundColor = user.online ? '#42b72a' : '#8a8d91';
                 
@@ -756,13 +827,37 @@
                 
                 const time = new Date(msg.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
                 
+                // Handle content as a dictionary
+                let contentHtml = '';
+                if (typeof msg.content === 'object') {
+                    // You can customize this based on your content structure
+                    if (msg.content.type) {
+                        switch(msg.content.type) {
+                            case 'text':
+                                contentHtml = `<p>${msg.content.text || ''}</p>`;
+                                break;
+                            case 'option':
+                                contentHtml = `<p class="option">${msg.content.text || ''}</p>`;
+                                break;
+                            // Add more cases for different content types
+                            default:
+                                contentHtml = `<p>${JSON.stringify(msg.content)}</p>`;
+                        }
+                    } else {
+                        contentHtml = `<p>${JSON.stringify(msg.content)}</p>`;
+                    }
+                }
+                
                 messageDiv.innerHTML = `
-                    <div>${msg.content}</div>
+                    <div class="message-content">${contentHtml}</div>
                     <span class="message-time">${time} ${isSentByMe && msg.read ? '✓' : ''}</span>
                 `;
                 
                 messagesContainer.appendChild(messageDiv);
             });
+            
+            // Scroll to bottom
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
         }
 
         // Send a message
@@ -773,29 +868,30 @@
             if (!content || !state.selectedChat) return;
 
             try {
+                const messageContent = {
+                    type: 'text',
+                    text: content
+                };
+
                 if (state.socket && state.socket.readyState === WebSocket.OPEN) {
-                    // Send via WebSocket if connected
                     state.socket.send(JSON.stringify({
                         recipient_id: state.selectedChat.id,
-                        content: content
+                        content: messageContent
                     }));
                 } else {
-                    // Fall back to REST API if WebSocket not connected
                     await fetch('/api/messages/', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
                             sender_id: state.userId,
                             recipient_id: state.selectedChat.id,
-                            content: content
+                            content: messageContent
                         })
                     });
                     
-                    // Refresh messages
-                    loadMessages(state.selectedChat);
+                    await loadMessages(state.selectedChat);
                 }
 
-                // Clear input
                 messageInput.value = '';
             } catch (error) {
                 console.error('Failed to send message:', error);

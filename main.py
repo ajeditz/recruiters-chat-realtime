@@ -1,7 +1,9 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List, Optional
-from pydantic import BaseModel
+# from pydantic import BaseModel
+from datetime import datetime
+from pydantic import BaseModel, Field
 import firebase_admin
 from firebase_admin import credentials, firestore , initialize_app
 import uuid
@@ -33,15 +35,21 @@ class Message(BaseModel):
     id: Optional[str] = None
     sender_id: str
     recipient_id: str
-    content: str
-    timestamp: Optional[float] = None
+    content: dict = {}
+    timestamp: Optional[datetime] = Field(default_factory=datetime.now)
     read: Optional[bool] = False
 
 class User(BaseModel):
-    id: str
+    id: Optional[str]=None
     name: str
     online: bool = False
     last_seen: Optional[float] = None
+    profile_pic_url: Optional[str] = None  # Add this field
+
+    class Config:
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
 
 class ConnectionManager:
     def __init__(self):
@@ -86,9 +94,11 @@ async def store_message(message: dict) -> str:
     if "id" not in message or not message["id"]:
         message["id"] = str(uuid.uuid4())
     
-    # Make sure timestamp exists
+    # Make sure timestamp exists and convert to ISO format string
     if "timestamp" not in message or not message["timestamp"]:
-        message["timestamp"] = datetime.now(timezone.utc).timestamp()
+        message["timestamp"] = datetime.now(timezone.utc).isoformat()
+    elif isinstance(message["timestamp"], datetime):
+        message["timestamp"] = message["timestamp"].isoformat()
     
     # Set read status to False for new messages
     if "read" not in message:
@@ -233,8 +243,23 @@ async def get_user_conversations(user_id: str):
                 "unread_count": conv_data["unread_count"]
             })
         
-        # Sort by last message timestamp in Python
-        result.sort(key=lambda x: x["last_message"].get("timestamp", 0), reverse=True)
+        # Sort by timestamp - handle both ISO string and datetime objects
+        def get_timestamp(x):
+            timestamp = x["last_message"].get("timestamp")
+            if isinstance(timestamp, str):
+                try:
+                    # Parse ISO format string and make it timezone-aware
+                    dt = datetime.fromisoformat(timestamp)
+                    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    return datetime.min.replace(tzinfo=timezone.utc)
+            elif isinstance(timestamp, datetime):
+                # Make naive datetime timezone-aware
+                return timestamp if timestamp.tzinfo else timestamp.replace(tzinfo=timezone.utc)
+            else:
+                return datetime.min.replace(tzinfo=timezone.utc)
+        
+        result.sort(key=get_timestamp, reverse=True)
         return result
     except Exception as e:
         print(f"Error retrieving conversations: {e}")
@@ -303,7 +328,7 @@ async def get_messages(user1_id: str, user2_id: str, limit: int = 50):
 @app.post("/api/messages/")
 async def send_message(message: Message):
     message.id = str(uuid.uuid4())
-    message.timestamp = datetime.now(timezone.utc).timestamp()
+    message.timestamp = datetime.now(timezone.utc)
     
     # Store message
     msg_dict = message.dict()
@@ -336,7 +361,7 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                 "sender_id": user_id,
                 "recipient_id": data["recipient_id"],
                 "content": data["content"],
-                "timestamp": datetime.now(timezone.utc).timestamp(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "read": False
             }
             
